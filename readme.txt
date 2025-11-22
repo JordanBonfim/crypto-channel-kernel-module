@@ -33,12 +33,10 @@ make
 
 Isso irá gerar o arquivo binário do módulo: cryptochannel.ko.
 
-2. Carregar o Módulo
+2. Carregar o Módulo via script
 
-Insira o módulo no kernel (necessário privilégios de root):
-
-sudo insmod cryptochannel.ko
-
+Execute:
+sudo sh ./run.sh
 
 3. Verificar Logs
 
