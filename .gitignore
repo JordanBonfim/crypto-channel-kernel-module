@@ -1,0 +1,19 @@
+# Artifacts de compilação de Módulos do Kernel
+
+*.o *.ko *.mod *.mod.c *.mod.o *.a *.s
+
+# Arquivos de metadados do Kernel build
+
+modules.order
+Module.symvers
+.tmp_versions/
+..cmd
+..d
+
+# Arquivos temporários de editores e sistema
+
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
