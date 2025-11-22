@@ -13,16 +13,56 @@
 static char *kernel_buffer; // Buffer no kernel
 static DEFINE_MUTEX(crypto_mutex); // Mutex para proteger o acesso ao buffer
 static int data_length = 0; // Tamanho dos dados no buffer
-
 static ssize_t device_read(struct file *file, char __user *buf, size_t count, loff_t *offset){
-    // Implementar leitura do dispositivo
     pr_info("CRYPTOCHANNEL: READ OPERATION\n");
-    return 0;
+    size_t bytes_to_copy;
+    int remaining_bytes = data_length - (int)*offset;
+
+    mutex_lock(&crypto_mutex);
+
+    
+
+    if(remaining_bytes <= 0){
+        mutex_unlock(&crypto_mutex);    
+        return 0; // EOF
+    }
+    
+    // Se o usuário pediu mais do que tem, entregamos só o que tem.
+    if (count < remaining_bytes)
+        bytes_to_copy = count;
+    else
+        bytes_to_copy = remaining_bytes;
+    
+    if(copy_to_user(buf, kernel_buffer + *offset, bytes_to_copy) != 0){
+        mutex_unlock(&crypto_mutex);
+        pr_info("Erro ao copiar para o usuário.");
+        return -EFAULT; //  Memory fault
+    } 
+    
+    *offset += bytes_to_copy;
+    mutex_unlock(&crypto_mutex);    
+    return bytes_to_copy;
+
 }
 
 static ssize_t device_write(struct file *file, const char __user *buf, size_t count, loff_t *offset){
     // Implementar escrita no dispositivo
     pr_info("CRYPTOCHANNEL: WRITE OPERATION\n");
+
+    mutex_lock(&crypto_mutex);
+
+    if(count > BUFFER_SIZE){
+        return -ENOMEM;
+    }
+
+    if(copy_from_user(kernel_buffer, buf, count) != 0){
+        pr_info("Erro ao copiar do usuário.");
+    }
+    data_length = count;
+
+    mutex_unlock(&crypto_mutex);
+
+
     return count;
 }
 
@@ -48,8 +88,7 @@ struct file_operations fops = {
 // Variável GLOBAL para guardar o ID do driver
 static int major_number;
 
-int init_module(void)  
-{  
+int init_module(void){  
     pr_info("CRYPTOCHANNEL: STARTED\n");  
 
     major_number = register_chrdev(0, "cryptochannel", &fops);
@@ -61,7 +100,7 @@ int init_module(void)
     /* A nonzero return means init_module failed; module can't be loaded. */
  
 
-    kernel_buffer = (BUFFER_SIZE, GFP_KERNEL); 
+    kernel_buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL); 
 
     // Verifica se a alocação funcionou 
     if (!kernel_buffer) {
