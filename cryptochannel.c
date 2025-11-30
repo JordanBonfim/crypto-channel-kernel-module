@@ -89,7 +89,6 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
     // Ajusta o count se for maior que o espaço disponível
     if(count > free_space){
         count = free_space; // Ajusta o count para o espaço disponível
-        return -ENOMEM; // Not enough memory
     }
 
     // Aloca memória temporária para receber os dados do usuário
