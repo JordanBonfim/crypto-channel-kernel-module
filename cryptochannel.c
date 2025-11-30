@@ -5,61 +5,118 @@
 #include <linux/module.h> // Needed by all modules
 #include <linux/printk.h> // Needed for pr_info()
 #include <linux/device.h> // Para criar a classe e o dispositivo no sistema (o que faz o arquivo aparecer no /dev).
-#include <linux/uaccess.h> //Para futuramente mover dados entre o usuário e o kernel (segurança).
+#include <linux/uaccess.h> // Para futuramente mover dados entre o usuário e o kernel (segurança).
 #include <linux/slab.h>  // Para kmalloc
 #include <linux/mutex.h> // Para mutex
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 1024 
 static char *kernel_buffer; // Buffer no kernel
 static DEFINE_MUTEX(crypto_mutex); // Mutex para proteger o acesso ao buffer
-static int data_length = 0; // Tamanho dos dados no buffer
+static int write_pos = 0; // Posição de escrita no buffer
+static int read_pos = 0; // Posição de leitura no buffer
+static int stored_count = 0; // Quantidade de dados armazenados no buffer
+
 static ssize_t device_read(struct file *file, char __user *buf, size_t count, loff_t *offset){
-    pr_info("CRYPTOCHANNEL: READ OPERATION\n");
+    char *temp_buf;
     size_t bytes_to_copy;
-    int remaining_bytes = data_length - (int)*offset;
+
+    pr_info("CRYPTOCHANNEL: READ OPERATION\n");
 
     mutex_lock(&crypto_mutex);
 
-    
-
-    if(remaining_bytes <= 0){
+    if(stored_count == 0){
         mutex_unlock(&crypto_mutex);    
         return 0; // EOF
     }
     
-    // Se o usuário pediu mais do que tem, entregamos só o que tem.
-    if (count < remaining_bytes)
+    // Ajusta o count se for maior que os dados armazenados
+    if (count > stored_count) {
+        bytes_to_copy = stored_count;
+    } else {
         bytes_to_copy = count;
-    else
-        bytes_to_copy = remaining_bytes;
-    
-    if(copy_to_user(buf, kernel_buffer + *offset, bytes_to_copy) != 0){
+    }
+
+    // Aloca memória temporária para copiar os dados
+    temp_buf = kmalloc(bytes_to_copy, GFP_KERNEL);
+    if(!temp_buf){
         mutex_unlock(&crypto_mutex);
-        pr_info("Erro ao copiar para o usuário.");
+        pr_info("CRYPTOCHANNEL: MEMORY ALLOCATION FAILED\n");
+        return -ENOMEM; // Not enough memory
+    }
+
+    // Copia os dados do buffer circular para o buffer temporário
+    for (int i = 0; i < bytes_to_copy; i++) {
+        // DECRIPITAÇÃO ENTRA AQUI
+
+        temp_buf[i] = kernel_buffer[read_pos];
+        read_pos = (read_pos + 1) % BUFFER_SIZE;
+    }
+    
+    if(copy_to_user(buf, temp_buf, bytes_to_copy) != 0){
+        kfree(temp_buf);
+        mutex_unlock(&crypto_mutex);
+        pr_info("CRYPTOCHANNEL: ERROR COPYING TO USER\n");
         return -EFAULT; //  Memory fault
     } 
     
-    *offset += bytes_to_copy;
+    // Atualiza a contagem de dados armazenados
+    stored_count -= bytes_to_copy;
+    kfree(temp_buf);
+
     mutex_unlock(&crypto_mutex);    
     return bytes_to_copy;
 
 }
 
 static ssize_t device_write(struct file *file, const char __user *buf, size_t count, loff_t *offset){
+    char *temp_buf;
+    int free_space;
+
     // Implementar escrita no dispositivo
     pr_info("CRYPTOCHANNEL: WRITE OPERATION\n");
 
     mutex_lock(&crypto_mutex);
 
-    if(count > BUFFER_SIZE){
-        return -ENOMEM;
+    free_space = BUFFER_SIZE - stored_count;
+
+    // Verifica se há espaço suficiente no buffer
+    if(free_space <= 0){
+        mutex_unlock(&crypto_mutex);
+        pr_info("CRYPTOCHANNEL: NO SPACE LEFT ON DEVICE\n");
+        return -ENOSPC; // No space left on device
     }
 
-    if(copy_from_user(kernel_buffer, buf, count) != 0){
-        pr_info("Erro ao copiar do usuário.");
+    // Ajusta o count se for maior que o espaço disponível
+    if(count > free_space){
+        count = free_space; // Ajusta o count para o espaço disponível
     }
-    data_length = count;
 
+    // Aloca memória temporária para receber os dados do usuário
+    temp_buf = kmalloc(count, GFP_KERNEL);
+    if(!temp_buf){
+        mutex_unlock(&crypto_mutex);
+        pr_info("CRYPTOCHANNEL: MEMORY ALLOCATION FAILED\n");
+        return -ENOMEM; // Not enough memory
+    }
+
+    if(copy_from_user(temp_buf, buf, count) != 0){
+        kfree(temp_buf);
+        mutex_unlock(&crypto_mutex);
+        pr_info("CRYPTOCHANNEL: ERROR COPYING FROM USER\n");
+        return -EFAULT; // Memory fault
+    }
+
+    // Escreve os dados no buffer circular
+    for (int i = 0; i < count; i++) {
+        // ENCRIPTAÇÃO ENTRA AQUI
+
+        kernel_buffer[write_pos] = temp_buf[i];
+        write_pos = (write_pos + 1) % BUFFER_SIZE;
+    }
+    
+    stored_count += count;
+
+    kfree(temp_buf);
     mutex_unlock(&crypto_mutex);
 
 
