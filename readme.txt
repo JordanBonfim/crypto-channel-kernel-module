@@ -38,6 +38,17 @@ Isso irá gerar o arquivo binário do módulo: cryptochannel.ko.
 Execute:
 sudo sh ./run.sh
 
+Para mandar uma mensegem:
+echo -n "mensagem de 16 bytes" > /dev/cryptochannel
+** -n tem de ser resolvido com tratamento de erro de \n ao final da mensagem
+** A mensagem somente de 16 bytes 'e resolvido com padding
+
+Para ler a mensagem:
+cat /dev/cryptochannel
+
+Para ver as estatisticas:
+cat /proc/cryptochannel/stats
+
 3. Verificar Logs
 
 Para confirmar se o módulo foi carregado e ver a mensagem "STARTED":
