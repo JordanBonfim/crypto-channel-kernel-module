@@ -8,6 +8,9 @@
 #include <linux/uaccess.h> // Para futuramente mover dados entre o usuário e o kernel (segurança).
 #include <linux/slab.h>  // Para kmalloc
 #include <linux/mutex.h> // Para mutex
+#include <linux/crypto.h>        // Core da API de criptografia
+#include <linux/scatterlist.h>   // Estrutura para passar dados para a crypto
+#include <crypto/skcipher.h>     // Symmetric Key Cipher API | API de Cifras Simétricas
 
 #define BUFFER_SIZE 1024 
 static char *kernel_buffer; // Buffer no kernel
@@ -15,6 +18,13 @@ static DEFINE_MUTEX(crypto_mutex); // Mutex para proteger o acesso ao buffer
 static int write_pos = 0; // Posição de escrita no buffer
 static int read_pos = 0; // Posição de leitura no buffer
 static int stored_count = 0; // Quantidade de dados armazenados no buffer
+
+//CRIPTOGRAFIA
+struct crypto_skcipher *tfm; // "Transform": O objeto que guarda o algoritmo (ex: AES)
+struct skcipher_request *req; // "Request": O pedido de encriptação
+char *crypto_key = "chave12345678901"; // Chave fixa por enquanto (16 bytes para AES-128)
+
+
 
 static ssize_t device_read(struct file *file, char __user *buf, size_t count, loff_t *offset){
     char *temp_buf;
@@ -169,18 +179,47 @@ int init_module(void){
         return -ENOMEM; // Código de erro padrão para "Out of Memory"
     }
 
+    // Alocar o transform de criptografia 
+    // tfm é o algoritmo em si
+    tfm = crypto_alloc_skcipher("ecb(aes)", 0, 0);
+    if(IS_ERR(tfm)){
+        pr_err("CRYPTOCHANNEL: FAILED TO ALLOCATE cbc(aes)");
+        return PTR_ERR(tfm); 
+    }
+
+    // Request de operação
+    // (req) é uma operação específica que você vai executar, como:
+    // cifrar ou decifrar um buffer
+    req = skcipher_request_alloc(tfm, GFP_KERNEL);
+    if(!req){
+        pr_err("CRYPTOCHANNEL: FAILED TO ALLOCATE request");
+        crypto_free_skcipher(tfm); // Libera algoritmo em caso de erro
+        kfree(kernel_buffer); // Libera também o buffer
+        return -ENOMEM;
+    }
+
+
+    // Definir chave utilizada
+    // 16 bytes é o padrão para AES-128
+    crypto_skcipher_setkey(tfm, crypto_key, 16);
+
+
+
     // Limpar a memória com zeros
     memset(kernel_buffer, 0, BUFFER_SIZE);
 
     return 0;  
 }  
   
-void cleanup_module(void)  
-{  
+void cleanup_module(void)  {  
     // Liberar a memória alocada
     if(kernel_buffer){
         kfree(kernel_buffer);
     }
+
+    skcipher_request_free(req);
+    crypto_free_skcipher(tfm);
+
     pr_info("CRYPTOCHANNEL: ENDED\n");
     unregister_chrdev(major_number, "cryptochannel");
 }
