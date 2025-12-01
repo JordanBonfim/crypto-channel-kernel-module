@@ -54,6 +54,7 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
         return -ENOMEM; // Not enough memory
     }
 
+
     // Copia os dados do buffer circular para o buffer temporário
     for (int i = 0; i < bytes_to_copy; i++) {
         // DECRIPITAÇÃO ENTRA AQUI
@@ -62,6 +63,20 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
         read_pos = (read_pos + 1) % BUFFER_SIZE;
     }
     
+    struct scatterlist sg;
+    sg_init_one(&sg, temp_buf, bytes_to_copy);
+
+    skcipher_request_set_crypt(req, &sg, &sg, bytes_to_copy, NULL);
+
+    int ret = crypto_skcipher_decrypt(req);
+
+    if(ret){
+        pr_info("CRYPTOCHANNEL: Decryption failed: %d\n", ret);
+        kfree(temp_buf);
+        mutex_unlock(&crypto_mutex);
+        return ret;
+    }
+
     if(copy_to_user(buf, temp_buf, bytes_to_copy) != 0){
         kfree(temp_buf);
         mutex_unlock(&crypto_mutex);
@@ -116,10 +131,27 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
         return -EFAULT; // Memory fault
     }
 
-    // Escreve os dados no buffer circular
-    for (int i = 0; i < count; i++) {
-        // ENCRIPTAÇÃO ENTRA AQUI
+    
+    // Mapeia o buffer para a scatterlist
+    struct scatterlist sg; // é como uma lista de páginas de memória
+    sg_init_one(&sg, temp_buf, count);
 
+    // Configura o pedido de criptografia
+    skcipher_request_set_crypt(req, &sg, &sg, count, NULL);
+
+    // Executa a criptografia
+    // Isso transforma os dados dentro do próprio temp_buf (in-place encryption)
+    int ret = crypto_skcipher_encrypt(req);
+    if(ret){
+        pr_info("CTYPTOCHANNEL: ENCRYPTION FAILED, %d\n", ret);
+        kfree(temp_buf);
+        mutex_unlock(&crypto_mutex);
+        return ret;
+    }
+
+
+    // Escreve os dados no buffer circular
+    for (int i = 0; i < count; i++) {        
         kernel_buffer[write_pos] = temp_buf[i];
         write_pos = (write_pos + 1) % BUFFER_SIZE;
     }
