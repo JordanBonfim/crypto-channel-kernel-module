@@ -70,8 +70,8 @@ echo -n "mensagem de 16 bytes" > /dev/cryptochannel
 ```
 
 Observações:
-- O `-n` no `echo` evita adicionar `\n`. Se uma nova linha for enviada, o módulo deve tratar essa terminação (comportamento do módulo descrito no código).
-- Mensagens menores que 16 bytes são preenchidas (padding) internamente.
+- O `-n` no `echo` evita adicionar `\n`. Se uma nova linha for enviada, o módulo deve tratar essa terminação, deve ser feito.
+- Mensagens menores que 16 bytes devem ser preenchidas (padding) internamente, deve ser feito.
 
 - Para ler a mensagem armazenada/recebida:
 
