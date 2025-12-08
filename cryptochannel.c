@@ -26,7 +26,6 @@ static int stored_count = 0; // Quantidade de dados armazenados no buffer
 //CRIPTOGRAFIA
 struct crypto_skcipher *tfm; // "Transform": O objeto que guarda o algoritmo (ex: AES)
 struct skcipher_request *req; // "Request": O pedido de encriptação
-char *crypto_key = "chave12345678901"; // Chave fixa por enquanto (16 bytes para AES-128)
 
 // /proc
 static struct proc_dir_entry *proc_folder; // Pasta no /proc/cryptochannel
@@ -230,6 +229,11 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
     char *temp_buf;
     int free_space;
 
+    size_t pad_len_needed = BLOCK_SIZE - (count % BLOCK_SIZE);
+    if (pad_len_needed == 0) pad_len_needed = BLOCK_SIZE;
+    
+    size_t total_size_needed = count + pad_len_needed;
+
     pr_info("CRYPTOCHANNEL: WRITE OPERATION\n");
 
     mutex_lock(&crypto_mutex);
@@ -295,7 +299,7 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
     kfree(padded_buf);
     mutex_unlock(&crypto_mutex);
 
-    return padded_len;
+    return count;
 }
 
 
@@ -367,7 +371,7 @@ int init_module(void){
 
     // Definir chave utilizada
     // 16 bytes é o padrão para AES-128
-    crypto_skcipher_setkey(tfm, crypto_key, BLOCK_SIZE);
+    crypto_skcipher_setkey(tfm, current_key, BLOCK_SIZE);
 
 
 
