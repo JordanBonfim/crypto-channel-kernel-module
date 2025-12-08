@@ -89,17 +89,18 @@ static ssize_t config_write(struct file *file, const char __user *buf, size_t co
     mutex_lock(&crypto_mutex);
 
     // Tenta definir a nova chave no transform
-    ret = crypto_skcipher_setkey(tfm, current_key, BLOCK_SIZE);
+    ret = crypto_skcipher_setkey(tfm, temp_buf, BLOCK_SIZE);
 
-    // Verifica se a definição da chave antiga foi bem-sucedida
     if(ret) {
-        pr_info("CRYPTOCHANNEL: FAILED TO SET OLD KEY BEFORE UPDATING\n");
+        pr_info("CRYPTOCHANNEL: FALHA AO SETAR NOVA CHAVE\n");
         stat_crypto_errors++;
         mutex_unlock(&crypto_mutex);
-        return -EINVAL; // Invalid argument
-    } else {
-        pr_info("CRYPTOCHANNEL: OLD KEY SET SUCCESSFULLY BEFORE UPDATING\n");
-    }
+        return -EINVAL; 
+    } 
+    
+    // 2. Se deu certo, atualiza a variável global para o /proc mostrar a certa
+    strcpy(current_key, temp_buf);
+    pr_info("CRYPTOCHANNEL: Chave atualizada com sucesso!\n");
 
     mutex_unlock(&crypto_mutex);
     return count;
