@@ -166,10 +166,15 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
         return 0; // EOF
     }
 
-    if (count > stored_count) {
-        bytes_to_copy = stored_count;
+    if (count < stored_count) {
+        bytes_to_copy = (count / BLOCK_SIZE) * BLOCK_SIZE;
+        
+        if (bytes_to_copy == 0) {
+             mutex_unlock(&crypto_mutex);
+             return -EINVAL; 
+        }
     } else {
-        bytes_to_copy = count;
+        bytes_to_copy = stored_count;
     }
 
     temp_buf = kmalloc(bytes_to_copy, GFP_KERNEL);
