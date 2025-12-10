@@ -1,7 +1,20 @@
-sudo rmmod cryptochannel
+#!/bin/bash
+
+# Remove silenciosamente
+sudo rmmod cryptochannel 2>/dev/null
+
+# Insere o módulo
 sudo insmod cryptochannel.ko
-major=$(dmesg | tail -1 | awk '{print $NF}') # Pega o ultimo numero do log
-sudo rm /dev/cryptochannel
-sudo mknod /dev/cryptochannel c $major 0
-sudo chmod 666 /dev/cryptochannel
-sudo dmesg | tail -3
+
+# Espera 1 segundo para o udev criar o arquivo /dev/cryptochannel
+echo "Aguardando criação do dispositivo..."
+sleep 1 
+
+# Dá permissão
+if [ -e /dev/cryptochannel ]; then
+    sudo chmod 666 /dev/cryptochannel
+    echo "Permissões concedidas e módulo carregado."
+else
+    echo "ERRO: O arquivo /dev/cryptochannel não foi criado."
+    echo "Verifique se o init_module possui device_create e class_create."
+fi
