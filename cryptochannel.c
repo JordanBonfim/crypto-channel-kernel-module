@@ -38,6 +38,11 @@ static unsigned long stat_crypto_errors = 0;
 
 static char current_key[17] = "chave12345678901"; // Chave atual (16 bytes + null terminator)
 
+// Filas de espera para bloquear processos (Produtor/Consumidor)
+static DECLARE_WAIT_QUEUE_HEAD(wq_read);  // Fila para leitores esperarem dados
+static DECLARE_WAIT_QUEUE_HEAD(wq_write); // Fila para escritores esperarem espaço
+
+
 // Função para mostrar as estatísticas no /proc/cryptochannel/stats
 static int stats_show(struct seq_file *m, void *v) {
     seq_printf(m, "Total Bytes Processed: %lu\n", stat_total_bytes);
@@ -158,22 +163,34 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
 
     pr_info("CRYPTOCHANNEL: READ OPERATION\n");
 
+    // Bloqueio, se não há dados dorme até alguém escrever
+
+    // se processo não quer esperar retorna erro se não tiver algo para ler imediatamente
+    if(file->f_flags & O_NONBLOCK){
+        if(stored_count == 0 ) return -EAGAIN;
+    }else{
+        // Dorme na fila enquanto stored_count = 0;
+        if(wait_event_interruptible(wq_read, stored_count > 0)){
+            return -ERESTARTSYS; // Sinal interrompeu (Ctrl+C)
+        }
+    }
+
+    
+
     mutex_lock(&crypto_mutex);
 
-    if (stored_count == 0) {
-        mutex_unlock(&crypto_mutex);
-        return 0; // EOF
-    }
 
     if (count < stored_count) {
         bytes_to_copy = (count / BLOCK_SIZE) * BLOCK_SIZE;
         
-        if (bytes_to_copy == 0) {
-             mutex_unlock(&crypto_mutex);
-             return -EINVAL; 
-        }
     } else {
         bytes_to_copy = stored_count;
+    }
+
+    // Se o usuário pediu menos que 1 bloco (16 bytes), não dá pra decifrar
+    if (bytes_to_copy == 0) {
+        mutex_unlock(&crypto_mutex);
+        return -EINVAL; 
     }
 
     temp_buf = kmalloc(bytes_to_copy, GFP_KERNEL);
@@ -183,9 +200,11 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
         return -ENOMEM;
     }
 
+    // Copia do buffer circular para o linear temporário
+    int current_read_pos = read_pos;
     for (size_t i = 0; i < bytes_to_copy; i++) {
-        temp_buf[i] = kernel_buffer[read_pos];
-        read_pos = (read_pos + 1) % BUFFER_SIZE;
+        temp_buf[i] = kernel_buffer[current_read_pos];
+        current_read_pos = (current_read_pos + 1) % BUFFER_SIZE;
     }
 
     struct scatterlist sg;
@@ -198,7 +217,7 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
         stat_crypto_errors++;
         kfree(temp_buf);
         mutex_unlock(&crypto_mutex);
-        return ret;
+        return -EIO;
     }
 
     /* Remover PKCS#7 padding */
@@ -217,62 +236,86 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
         pr_info("CRYPTOCHANNEL: ERROR COPYING TO USER\n");
         return -EFAULT;
     }
-
+    read_pos = current_read_pos;
     stored_count -= bytes_to_copy;
     kfree(temp_buf);
 
+    wake_up_interruptible(&wq_write);
     mutex_unlock(&crypto_mutex);
     return unpadded_len;
 }
 
 static ssize_t device_write(struct file *file, const char __user *buf, size_t count, loff_t *offset){
+    size_t pad_len_needed;
     char *temp_buf;
-    int free_space;
 
-    size_t pad_len_needed = BLOCK_SIZE - (count % BLOCK_SIZE);
+    pad_len_needed = BLOCK_SIZE - (count % BLOCK_SIZE);
     if (pad_len_needed == 0) pad_len_needed = BLOCK_SIZE;
     
-    size_t total_size_needed = count + pad_len_needed;
 
     pr_info("CRYPTOCHANNEL: WRITE OPERATION\n");
 
-    mutex_lock(&crypto_mutex);
-
-    free_space = BUFFER_SIZE - stored_count;
-
-    if (free_space <= 0) {
-        mutex_unlock(&crypto_mutex);
-        pr_info("CRYPTOCHANNEL: NO SPACE LEFT ON DEVICE\n");
-        return -ENOSPC;
-    }
-
-    if (count > free_space) {
-        count = free_space;
-    }
+    pad_len_needed = BLOCK_SIZE - (count % BLOCK_SIZE);
+    if (pad_len_needed == 0) pad_len_needed = BLOCK_SIZE;
+    size_t total_size_needed = count + pad_len_needed;
 
     temp_buf = kmalloc(count, GFP_KERNEL);
     if (!temp_buf) {
-        mutex_unlock(&crypto_mutex);
         pr_info("CRYPTOCHANNEL: MEMORY ALLOCATION FAILED\n");
         return -ENOMEM;
     }
 
     if (copy_from_user(temp_buf, buf, count) != 0) {
         kfree(temp_buf);
-        mutex_unlock(&crypto_mutex);
         pr_info("CRYPTOCHANNEL: ERROR COPYING FROM USER\n");
         return -EFAULT;
     }
 
-    /* Aplicar padding */
-    char *padded_buf;
+    // Aplicar padding
+    char *padded_buf;  // Buffer após padding
     ssize_t padded_len = apply_padding(temp_buf, count, &padded_buf);
     kfree(temp_buf);
     if (padded_len < 0) {
-        mutex_unlock(&crypto_mutex);
         pr_info("CRYPTOCHANNEL: PADDING FAILED\n");
         return padded_len;
     }
+
+    // Se não pode pode esperar e não tem espaço, erro.
+    if(file->f_flags & O_NONBLOCK){
+
+        if(mutex_lock_interruptible(&crypto_mutex)){
+            kfree(padded_buf);
+            return -ERESTARTSYS;
+        }
+        if(total_size_needed > (BUFFER_SIZE - stored_count)){
+            pr_info("CRYPTOCHANNEL: NO SPACE LEFT ON DEVICE\n");
+            mutex_unlock(&crypto_mutex);
+            kfree(padded_buf);
+            return -EAGAIN;
+        }
+    }else{
+        // Espera espaço suficiente
+        if(wait_event_interruptible(wq_write, (BUFFER_SIZE - stored_count) >= total_size_needed)){
+            kfree(padded_buf);
+            return -ERESTARTSYS; // Sinal interrompeu (Ctrl+C)
+        }
+        
+
+        // Acordou e tem espaço, pega o mutex
+        if(mutex_lock_interruptible(&crypto_mutex)){
+            kfree(padded_buf);
+            return -ERESTARTSYS;
+        }
+
+        // Se outro processo pegou espaço antes do lock
+        if((BUFFER_SIZE - stored_count) < total_size_needed){
+            mutex_unlock(&crypto_mutex);
+            kfree(padded_buf);
+            pr_info("CRYPTOCHANNEL: NO SPACE LEFT ON DEVICE\n");
+            return -EAGAIN;
+        }
+    }
+
 
     struct scatterlist sg;
     sg_init_one(&sg, padded_buf, padded_len);
@@ -287,6 +330,7 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
         return ret;
     }
 
+    // Escreve no buffer circular
     for (size_t i = 0; i < padded_len; i++) {
         kernel_buffer[write_pos] = padded_buf[i];
         write_pos = (write_pos + 1) % BUFFER_SIZE;
@@ -297,6 +341,10 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
     stat_total_msgs++;
 
     kfree(padded_buf);
+
+    //Acorda consumidores dormindo
+    wake_up_interruptible(&wq_read);
+
     mutex_unlock(&crypto_mutex);
 
     return count;
