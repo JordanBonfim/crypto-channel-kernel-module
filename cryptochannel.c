@@ -372,6 +372,8 @@ struct file_operations fops = {
 
 // Variável GLOBAL para guardar o ID do driver
 static int major_number;
+static struct class *cryptochannel_class = NULL;
+static struct device *cryptochannel_device = NULL;
 
 int init_module(void){  
     pr_info("CRYPTOCHANNEL: STARTED\n");  
@@ -383,6 +385,24 @@ int init_module(void){
     }
     pr_info("CRYPTOCHANNEL: REGISTERED WITH MAJOR NUMBER %d\n", major_number);
     /* A nonzero return means init_module failed; module can't be loaded. */
+
+    // Criar a Classe do Dispositivo
+    // Organizar o dispositivo no sistema (/sys/class/...)
+    cryptochannel_class = class_create("cryptochannel_class");
+    if (IS_ERR(cryptochannel_class)) {
+        unregister_chrdev(major_number, "cryptochannel");
+        pr_info("CRYPTOCHANNEL: FAILED TO CREATE CLASS\n");
+        return PTR_ERR(cryptochannel_class);
+    }
+
+    // Criar o Dispositivo  /dev/cryptochannel 
+    cryptochannel_device = device_create(cryptochannel_class, NULL, MKDEV(major_number, 0), NULL, "cryptochannel");
+    if (IS_ERR(cryptochannel_device)) {
+        class_destroy(cryptochannel_class);
+        unregister_chrdev(major_number, "cryptochannel");
+        pr_info("CRYPTOCHANNEL: FAILED TO CREATE DEVICE\n");
+        return PTR_ERR(cryptochannel_device);
+    }
  
 
     kernel_buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL); 
@@ -455,6 +475,7 @@ int init_module(void){
 }  
   
 void cleanup_module(void)  {  
+    // Limpeza do /proc
     if (proc_config) {
         proc_remove(proc_config);
     }
@@ -469,12 +490,18 @@ void cleanup_module(void)  {
     if(kernel_buffer){
         kfree(kernel_buffer);
     }
+    if (req) skcipher_request_free(req);
+    if (tfm) crypto_free_skcipher(tfm);
 
-    skcipher_request_free(req);
-    crypto_free_skcipher(tfm);
-
-    pr_info("CRYPTOCHANNEL: ENDED\n");
+    // Limpeza do Dispositivo e Classe 
+    // Remove o arquivo /dev/cryptochannel
+    device_destroy(cryptochannel_class, MKDEV(major_number, 0));
+    // Remove a classe do sistema
+    class_destroy(cryptochannel_class);
+    
+    // Desregistra o driver
     unregister_chrdev(major_number, "cryptochannel");
+    pr_info("CRYPTOCHANNEL: ENDED\n");
 }
  
  
