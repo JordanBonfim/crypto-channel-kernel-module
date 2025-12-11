@@ -87,6 +87,59 @@ cat /proc/cryptochannel/stats
 
 ---
 
+## Produtor / Consumidor
+
+Há um pequeno par de programas em `produtor_consumidor/` que demonstram como escrever (produtor) e ler (consumidor) mensagens do dispositivo `/dev/cryptochannel`.
+
+- **Compilar**:
+
+```bash
+cd produtor_consumidor
+make
+```
+
+- **Pré-requisito**: o módulo deve estar carregado e o dispositivo `/dev/cryptochannel` criado com permissões de leitura/escrita. Use o script do projeto para isso:
+
+```bash
+sudo sh ../run.sh
+```
+
+- **Executar** (recomendado em dois terminais separados):
+
+Terminal A (consumidor - fica aguardando mensagens):
+
+```bash
+cd produtor_consumidor
+./consumidor
+```
+
+Terminal B (produtor - envia mensagens interativas):
+
+```bash
+cd produtor_consumidor
+./produtor
+```
+
+- **Alternativa**: executar o `consumidor` em background no mesmo terminal:
+
+```bash
+cd produtor_consumidor
+./consumidor &
+./produtor
+```
+
+- **Controles**:
+	- No `produtor`, digite mensagens e pressione Enter para enviar. Digite `sair` para encerrar o produtor.
+	- No `consumidor`, use `Ctrl+C` para parar o consumidor.
+
+- **Limpeza dos binários**:
+
+```bash
+cd produtor_consumidor
+make clean
+```
+
+
 ## Logs e diagnóstico
 
 Mensagens de inicialização/finalização e outros logs ficam no buffer do kernel. Use:
