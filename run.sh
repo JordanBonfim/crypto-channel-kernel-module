@@ -1,15 +1,10 @@
-#!/bin/bash
-
 # Remove silenciosamente
 sudo rmmod cryptochannel 2>/dev/null
-
 # Insere o módulo
 sudo insmod cryptochannel.ko
-
 # Espera 1 segundo para o udev criar o arquivo /dev/cryptochannel
 echo "Aguardando criação do dispositivo..."
 sleep 1 
-
 # Dá permissão
 if [ -e /dev/cryptochannel ]; then
     sudo chmod 666 /dev/cryptochannel
