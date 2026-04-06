@@ -186,6 +186,4 @@ Este repositório é destinado a fins educacionais. Se quiser contribuir com mel
 
 ## Licença
 
-Coloque aqui a licença do seu projeto, se aplicável (por exemplo, MIT). Se preferir, mantenha sem licença até decidir.
-
-
+Este projeto está licenciado sob a [Licença MIT](LICENSE). Consulte o arquivo `LICENSE` para mais detalhes.
